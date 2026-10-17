@@ -16,3 +16,7 @@
 #score(..args)
 #line(length: 100%, stroke: 0.2pt + gray)
 #score(..args, output: "native")
+#line(length: 100%, stroke: 0.2pt + gray)
+// `recolor` remaps colours at placement: the red note draws green, the rest
+// stay as engraved.
+#score(..args, output: "native", recolor: c => if c == "#ff0000" { "#00a000" } else { c })

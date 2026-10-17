@@ -160,9 +160,12 @@
 // the box the SVG form would take. Coordinates are mm from the box's top-left,
 // y down; glyphs are music-font text at their baseline origin, so they raster
 // through Typst's glyph cache and a recoloured note changes one item.
-#let render-native-system(system, music-font, avail-width-mm) = {
+#let render-native-system(system, music-font, avail-width-mm, recolor) = {
   let mm(v) = v * 1mm
-  let paint(item) = typst-color(item.at("color", default: "black"))
+  let paint(item) = {
+    let c = item.at("color", default: "black")
+    if recolor == none { typst-color(c) } else { typst-color(recolor(c)) }
+  }
   let anchored(a) = {
     let h = if a.contains("east") { right } else if a.contains("west") { left } else { center }
     let v = if a.contains("north") { top } else if a.contains("south") { bottom } else { horizon }
@@ -261,6 +264,9 @@
 /// - output: "svg" (default) embeds each system as an SVG image; "native" places
 ///   its lines, shapes and glyphs as Typst content (glyphs need the music font
 ///   on the font path)
+/// - recolor: native output only; a function mapping each item's colour string
+///   to the colour it is drawn in, so a caller can recolour notes without
+///   re-engraving (default none: colours as given)
 #let score(
   staves: (),
   lyrics: (),
@@ -289,6 +295,7 @@
   relative-octave: false,
   measures-per-line: none,
   output: "svg",
+  recolor: none,
 ) = {
   if staves.len() == 0 { return }
 
@@ -352,7 +359,7 @@
 
     for system in result.systems {
       if output == "native" {
-        block(render-native-system(system, music-font, avail-width-mm))
+        block(render-native-system(system, music-font, avail-width-mm, recolor))
       } else {
         block(image(bytes(system.svg), format: "svg"))
       }
