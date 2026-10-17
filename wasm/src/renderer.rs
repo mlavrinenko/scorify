@@ -2173,6 +2173,7 @@ pub fn render_system_group(
         sp_unit,
         show_time,
         instrument_indent,
+        font,
     );
 
     // Render header text
@@ -2557,6 +2558,7 @@ fn compute_shared_prefix(
     sp: f64,
     show_time: bool,
     instrument_indent_sp: f64,
+    font: glyph::FontId,
 ) -> (f64, f64) {
     let mut max_time_x: f64 = 0.0;
     let mut max_music_start: f64 = 0.0;
@@ -2585,7 +2587,11 @@ fn compute_shared_prefix(
         if show {
             max_time_x = max_time_x.max(local_time_x);
         }
-        let local_music_start = prefix_x + clef_w + key_w + time_w + MUSIC_START_PADDING * sp;
+        // The padding holds one accidental; a leading chord's stacked lanes need more.
+        let overhang =
+            layout::first_accidental_overhang(laid_out.items.iter().map(|i| &i.event), font);
+        let local_music_start =
+            prefix_x + clef_w + key_w + time_w + (MUSIC_START_PADDING + overhang) * sp;
         max_music_start = max_music_start.max(local_music_start);
     }
 
@@ -2605,7 +2611,9 @@ fn compute_total_width(
         .iter()
         .map(|s| s.total_width)
         .fold(0.0_f64, f64::max);
-    music_start_x / sp + max_tw + 1.0
+    // The music spreads over its layout width plus 2 sp (`render_system`), then
+    // 1 sp of end padding: the same width the staff lines are drawn to.
+    music_start_x / sp + max_tw + 3.0
 }
 
 fn normalize_instrument_name(name: &str) -> String {
@@ -7536,6 +7544,8 @@ fn note_visual_top(item: &LaidOutItem, y_top: f64, sp: f64) -> f64 {
             let glyph_top = glyph::bbox(notehead_smufl(c.duration)).map_or(1.0, |b| b.ne_y) * sp;
             (top_y + 0.9 * sp).max(top_y + glyph_top)
         }
+        // A rest or bar line sits inside the staff: no reach above it.
+        Event::Rest(_) | Event::Barline(_) | Event::Spacer(_) => y_top,
         _ => y_top + 1.0 * sp,
     }
 }

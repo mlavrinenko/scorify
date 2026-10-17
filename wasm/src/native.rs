@@ -391,6 +391,97 @@ mod tests {
         assert!(title.is_some_and(|a| !a.is_empty()));
     }
 
+    /// Without a width a system takes its natural width, and its box must still
+    /// hold every staff line and barline it draws.
+    #[test]
+    fn a_natural_width_system_holds_its_lines() {
+        for staves in [1, 2] {
+            let mut score = input(Some("native"));
+            score.staves.truncate(staves);
+            score.width_mm = None;
+            for system in crate::process_score(&score).systems {
+                let width = system.box_width.unwrap();
+                for item in &system.items {
+                    if let NativeCmd::Line { x1, x2, .. } = item {
+                        assert!(
+                            x1.max(*x2) <= width,
+                            "{staves} staves: line to {} past {width}",
+                            x1.max(*x2)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A chord opening the music stacks its accidentals in lanes to its left; the music
+    /// start must leave them room clear of the clef, on one staff or a braced pair.
+    #[test]
+    fn a_leading_chord_s_accidentals_clear_the_clef() {
+        for staves in [1, 2] {
+            let mut score = input(Some("native"));
+            score.staves.truncate(staves);
+            score.staves[0].music = "<c' c#' d#' f#' g#' a#'>1".into();
+            score.key = "C".into();
+            score.title = None;
+            let system = &crate::process_score(&score).systems[0];
+            let codepoint = |v: &str| v.chars().next().map_or(0, u32::from);
+            let clef_right = system
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    NativeCmd::Glyphs { x, v, s, .. } if codepoint(v) == 0xE050 => {
+                        Some(x + s / 4.0 * 2.6)
+                    }
+                    _ => None,
+                })
+                .fold(f64::NEG_INFINITY, f64::max);
+            let first_accidental = system
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    NativeCmd::Glyphs { x, v, .. } if (0xE260..=0xE26F).contains(&codepoint(v)) => {
+                        Some(*x)
+                    }
+                    _ => None,
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                first_accidental > clef_right,
+                "{staves} staves: an accidental at {first_accidental} overprints the clef ending at {clef_right}"
+            );
+        }
+    }
+
+    /// A rest sits inside its staff, so a lower staff of rests leaves the gap at the
+    /// configured spacing rather than padding it as if the rest reached above the staff.
+    #[test]
+    fn a_resting_lower_staff_keeps_the_configured_gap() {
+        let mut score = input(Some("native"));
+        score.title = None;
+        score.time = None;
+        score.staves[0].music = "g1 |".into();
+        score.staves[1].music = "r1 |".into();
+        score.staff_spacing_mm = 2.0;
+        let system = &crate::process_score(&score).systems[0];
+        let mut rules: Vec<f64> = system
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                NativeCmd::Line { x1, x2, y1, y2, .. } if y1 == y2 && x2 - x1 > 20.0 => Some(*y1),
+                _ => None,
+            })
+            .collect();
+        rules.sort_by(f64::total_cmp);
+        rules.dedup();
+        let gap = rules[5] - rules[4];
+        assert!(
+            (gap - score.staff_spacing_mm).abs() < 1e-6,
+            "the staves sit {gap}mm apart, configured {}mm",
+            score.staff_spacing_mm
+        );
+    }
+
     #[test]
     fn native_colours_ride_on_their_items() {
         let system = &render(Some("native")).systems[0];

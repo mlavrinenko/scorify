@@ -325,6 +325,29 @@ pub fn chord_accidental_lanes(
     (note_lanes, lane_widths)
 }
 
+/// How much wider than one accidental the first note or chord's accidental stack is, in
+/// staff spaces. The music start pads for one accidental; a leading chord whose accidentals
+/// stack in several lanes needs this much more, or the stack overprints the clef, key and
+/// time signatures.
+pub fn first_accidental_overhang<'a>(
+    events: impl IntoIterator<Item = &'a Event>,
+    font: glyph::FontId,
+) -> f64 {
+    let Some(Event::Chord(c)) = events.into_iter().find(|e| e.is_note() || e.is_chord()) else {
+        return 0.0;
+    };
+    let positions: Vec<i32> = c
+        .notes
+        .iter()
+        .map(|n| pitch::pitch_to_diatonic(&n.name, n.octave))
+        .collect();
+    let specs: Vec<Option<&str>> = c.notes.iter().map(|n| n.accidental.as_deref()).collect();
+    let (_, widths) = chord_accidental_lanes(&positions, &specs, font);
+    let widest = widths.iter().copied().fold(0.0, f64::max);
+    let gaps = DEFAULT_CHORD_ACCIDENTAL_STACK_PADDING * widths.len().saturating_sub(1) as f64;
+    widths.iter().sum::<f64>() - widest + gaps
+}
+
 fn event_has_accidental(event: &Event) -> bool {
     match event {
         Event::Note(n) => n.accidental.is_some(),
@@ -2141,6 +2164,27 @@ mod tests {
         let dense_width = event_width(&bar, None, Some(&dense));
 
         assert!(dense_width > single_width);
+    }
+
+    #[test]
+    fn a_leading_chord_reserves_its_extra_accidental_lanes() {
+        let font = glyph::FontId::Leland;
+        let single = note("f", Some("sharp"), 4);
+        let dense = chord(
+            &[
+                ("b", Some("flat"), 4),
+                ("d", Some("flat"), 5),
+                ("f", Some("flat"), 5),
+            ],
+            4,
+        );
+        assert_eq!(first_accidental_overhang([&single], font), 0.0);
+        assert_eq!(first_accidental_overhang([&barline(), &single], font), 0.0);
+        let overhang = first_accidental_overhang([&barline(), &dense], font);
+        assert!(
+            overhang > 1.0,
+            "three stacked flats need room, got {overhang}"
+        );
     }
 
     #[test]
