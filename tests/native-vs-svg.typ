@@ -20,3 +20,7 @@
 // `recolor` remaps colours at placement: the red note draws green, the rest
 // stay as engraved.
 #score(..args, output: "native", recolor: c => if c == "#ff0000" { "#00a000" } else { c })
+#line(length: 100%, stroke: 0.2pt + gray)
+// `width: none` draws the natural width: the bars at their own spacing, the
+// staff lines ending at the final barline.
+#score(..args, output: "native", width: none)

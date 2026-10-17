@@ -160,10 +160,10 @@
 // the box the SVG form would take. Coordinates are mm from the box's top-left,
 // y down; glyphs are music-font text at their baseline origin, so they raster
 // through Typst's glyph cache and a recoloured note changes one item.
-#let render-native-system(system, music-font, avail-width-mm, recolor) = {
+#let render-native-system(system, music-font, avail-width-mm, recolor, color: none) = {
   let mm(v) = v * 1mm
   let paint(item) = {
-    let c = item.at("color", default: "black")
+    let c = item.at("color", default: if color == none { "black" } else { normalize-color(color) })
     if recolor == none { typst-color(c) } else { typst-color(recolor(c)) }
   }
   let anchored(a) = {
@@ -225,9 +225,77 @@
     }
   })
   // The SVG form is an image, which Typst shrinks to the width it is given;
-  // scale the same way so both forms take the same room.
-  let fit = calc.min(1, avail-width-mm / system.box_width)
+  // scale the same way so both forms take the same room. A natural-width
+  // system (`width: none`) keeps its own size.
+  let fit = if avail-width-mm == none { 1 } else { calc.min(1, avail-width-mm / system.box_width) }
   if fit < 1 { scale(fit * 100%, origin: top + left, reflow: true, drawn) } else { drawn }
+}
+
+/// Engrave a score without placing it: the plugin's systems, each with its
+/// `items` (native output) or `svg`, its `box_width`/`box_height` in mm, and
+/// the music's own `width`/`height`. For a caller that places the drawing
+/// itself, such as one that draws notes and staff in separate layers.
+///
+/// Takes `score()`'s engraving parameters; `width` is a length, or `none` for
+/// the natural width, the music at its own spacing without stretching to fill
+/// a line (each system then measures what its content needs). Output is
+/// `"native"` by default here.
+#let engrave(
+  staves: (),
+  key: "C",
+  time: none,
+  staff-group: "none",
+  staff-size: 1.75mm,
+  system-spacing: 12mm,
+  staff-spacing: 8mm,
+  color: none,
+  note-colors: none,
+  music-font: "Leland",
+  tuplet-style: "bracket",
+  width: none,
+  measure-numbers: "system",
+  measures-per-line: none,
+  output: "native",
+) = {
+  let input = (
+    staves: staves.map(s => (
+      clef: s.at("clef", default: none),
+      music: s.at("music", default: ""),
+      label: s.at("label", default: none),
+      instrument_name: s.at("instrument-name", default: none),
+      instrument_name_cont: s.at("instrument-name-cont", default: none),
+      instrument_name_shared: s.at("instrument-name-shared", default: false),
+      fingering_position: s.at("fingering-position", default: "above"),
+      color: normalize-color(s.at("color", default: none)),
+      note_colors: normalize-note-colors(s.at("note-colors", default: none)),
+      barline_group_start: s.at("barline-group-start", default: s.at("connect-start", default: false)),
+      barline_group_end: s.at("barline-group-end", default: s.at("connect-end", default: false)),
+      bracket_start: s.at("bracket-start", default: false),
+      bracket_end: s.at("bracket-end", default: false),
+      brace_start: s.at("brace-start", default: false),
+      brace_end: s.at("brace-end", default: false),
+    )),
+    key: key,
+    time: time,
+    title: none,
+    subtitle: none,
+    composer: none,
+    arranger: none,
+    lyricist: none,
+    staff_group: staff-group,
+    staff_size_mm: staff-size / 1mm,
+    width_mm: if width == none { none } else { width / 1mm },
+    staff_spacing_mm: staff-spacing / 1mm,
+    system_spacing_mm: system-spacing / 1mm,
+    measures_per_line: measures-per-line,
+    measure_numbers: measure-numbers,
+    music_font: music-font,
+    color: normalize-color(color),
+    note_colors: normalize-note-colors(note-colors),
+    tuplet_style: tuplet-style,
+    output: output,
+  )
+  json(scorify-wasm.render_score(bytes(json.encode(input)))).systems
 }
 
 /// Render a complete music score.
@@ -258,7 +326,8 @@
 /// - staff-spacing: vertical space between staves within a system
 /// - music-font: SMuFL font family (defaults to Leland)
 /// - tuplet-style: `"bracket"` or `"number"` (defaults to `"bracket"`)
-/// - width: explicit width or auto
+/// - width: explicit width, auto (the available width), or none (the natural
+///   width: the music at its own spacing, not stretched to fill the line)
 /// - measure-numbers: "system", "every", "none"
 /// - measures-per-line: if set, force this many measures per system line
 /// - output: "svg" (default) embeds each system as an SVG image; "native" places
@@ -314,52 +383,28 @@
     color: color,
   )
 
-  let render-inner(avail-width-mm) = {
-    let input = (
-      staves: staves.map(s => (
-        clef: s.at("clef", default: none),
-        music: s.at("music", default: ""),
-        label: s.at("label", default: none),
-        instrument_name: s.at("instrument-name", default: none),
-        instrument_name_cont: s.at("instrument-name-cont", default: none),
-        instrument_name_shared: s.at("instrument-name-shared", default: false),
-        fingering_position: s.at("fingering-position", default: "above"),
-        color: normalize-color(s.at("color", default: none)),
-        note_colors: normalize-note-colors(s.at("note-colors", default: none)),
-        barline_group_start: s.at("barline-group-start", default: s.at("connect-start", default: false)),
-        barline_group_end: s.at("barline-group-end", default: s.at("connect-end", default: false)),
-        bracket_start: s.at("bracket-start", default: false),
-        bracket_end: s.at("bracket-end", default: false),
-        brace_start: s.at("brace-start", default: false),
-        brace_end: s.at("brace-end", default: false),
-      )),
+  // `avail` is the width in mm, or none for the natural width.
+  let render-inner(avail) = {
+    let systems = engrave(
+      staves: staves,
       key: key,
       time: time,
-      title: none,
-      subtitle: none,
-      composer: none,
-      arranger: none,
-      lyricist: none,
-      staff_group: staff-group,
-      staff_size_mm: staff-size / 1mm,
-      width_mm: avail-width-mm,
-      staff_spacing_mm: staff-spacing / 1mm,
-      system_spacing_mm: system-spacing / 1mm,
-      measures_per_line: measures-per-line,
-      measure_numbers: measure-numbers,
-      music_font: music-font,
-      color: normalize-color(color),
-      note_colors: normalize-note-colors(note-colors),
-      tuplet_style: tuplet-style,
+      staff-group: staff-group,
+      staff-size: staff-size,
+      system-spacing: system-spacing,
+      staff-spacing: staff-spacing,
+      color: color,
+      note-colors: note-colors,
+      music-font: music-font,
+      tuplet-style: tuplet-style,
+      width: if avail == none { none } else { avail * 1mm },
+      measure-numbers: measure-numbers,
+      measures-per-line: measures-per-line,
       output: output,
     )
-
-    let result-bytes = scorify-wasm.render_score(bytes(json.encode(input)))
-    let result = json(result-bytes)
-
-    for system in result.systems {
+    for system in systems {
       if output == "native" {
-        block(render-native-system(system, music-font, avail-width-mm, recolor))
+        block(render-native-system(system, music-font, avail, recolor, color: color))
       } else {
         block(image(bytes(system.svg), format: "svg"))
       }
@@ -371,6 +416,8 @@
     layout(size => {
       render-inner(size.width / 1mm)
     })
+  } else if width == none {
+    render-inner(none)
   } else {
     render-inner(width / 1mm)
   }

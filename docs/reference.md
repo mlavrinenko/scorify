@@ -37,7 +37,7 @@ Primary entry point for one or more staves.
 | `lyric-line-spacing` | length | `none` | Override stacked lyric line spacing |
 | `music-font` | string | `"Leland"` | SMuFL font family |
 | `music-font-metadata` | dictionary/none | `none` | Optional metadata dictionary |
-| `width` | length/auto | `auto` | Explicit width or auto |
+| `width` | length/auto/none | `auto` | Explicit width, auto (the available width), or none (the natural width) |
 | `measures-per-line` | int | `none` | Force a fixed number of measures per system |
 
 Staff dictionaries support:
