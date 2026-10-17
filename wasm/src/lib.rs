@@ -1,5 +1,6 @@
 pub mod glyph;
 pub mod layout;
+pub mod native;
 pub mod parser;
 pub mod pitch;
 pub mod renderer;
@@ -218,6 +219,7 @@ fn process_score(params: &ScoreInput) -> ScoreOutput {
                 .collect::<Vec<_>>(),
             &params.music_font,
             &params.tuplet_style,
+            params.output,
         );
         output_systems.push(sys_output);
     }
@@ -705,6 +707,7 @@ mod tests {
             color: None,
             note_colors: None,
             tuplet_style: "bracket".into(),
+            output: OutputMode::Svg,
         }
     }
 

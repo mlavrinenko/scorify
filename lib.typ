@@ -156,6 +156,77 @@
   })
 }
 
+// One system's native items (`output: "native"`) placed as Typst content in
+// the box the SVG form would take. Coordinates are mm from the box's top-left,
+// y down; glyphs are music-font text at their baseline origin, so they raster
+// through Typst's glyph cache and a recoloured note changes one item.
+#let render-native-system(system, music-font, avail-width-mm) = {
+  let mm(v) = v * 1mm
+  let paint(item) = typst-color(item.at("color", default: "black"))
+  let anchored(a) = {
+    let h = if a.contains("east") { right } else if a.contains("west") { left } else { center }
+    let v = if a.contains("north") { top } else if a.contains("south") { bottom } else { horizon }
+    h + v
+  }
+  let drawn = box(width: mm(system.box_width), height: mm(system.box_height), {
+    for item in system.items {
+      let t = item.t
+      if t == "L" {
+        place(top + left, line(
+          start: (mm(item.x1), mm(item.y1)),
+          end: (mm(item.x2), mm(item.y2)),
+          stroke: (paint: paint(item), thickness: mm(item.w), cap: "butt"),
+        ))
+      } else if t == "G" {
+        place(top + left, dx: mm(item.x), dy: mm(item.y), text(
+          font: music-font,
+          size: mm(item.s),
+          fill: paint(item),
+          top-edge: "baseline",
+          bottom-edge: "baseline",
+          item.v,
+        ))
+      } else if t == "T" {
+        place(top + left, dx: mm(item.x), dy: mm(item.y), box(width: 0pt, height: 0pt, place(
+          anchored(item.a),
+          text(
+            size: item.s * 1pt,
+            weight: if item.w == "bold" { "bold" } else { "regular" },
+            style: if item.i { "italic" } else { "normal" },
+            fill: paint(item),
+            top-edge: "ascender",
+            bottom-edge: "descender",
+            item.v,
+          ),
+        )))
+      } else if t == "P" {
+        let pts = item.pts.chunks(2).map(((x, y)) => (mm(x), mm(y)))
+        place(top + left, polygon(fill: paint(item), stroke: none, ..pts))
+      } else if t == "B" {
+        let p = item.pts.chunks(2).map(((x, y)) => (mm(x), mm(y)))
+        place(top + left, curve(
+          fill: paint(item),
+          stroke: none,
+          curve.move(p.at(0)),
+          curve.cubic(p.at(1), p.at(2), p.at(3)),
+          curve.cubic(p.at(4), p.at(5), p.at(0)),
+          curve.close(),
+        ))
+      } else if t == "C" {
+        place(top + left, dx: mm(item.x - item.r), dy: mm(item.y - item.r), circle(
+          radius: mm(item.r),
+          fill: paint(item),
+          stroke: none,
+        ))
+      }
+    }
+  })
+  // The SVG form is an image, which Typst shrinks to the width it is given;
+  // scale the same way so both forms take the same room.
+  let fit = calc.min(1, avail-width-mm / system.box_width)
+  if fit < 1 { scale(fit * 100%, origin: top + left, reflow: true, drawn) } else { drawn }
+}
+
 /// Render a complete music score.
 ///
 /// This is the primary entry point for the scorify library.
@@ -187,6 +258,9 @@
 /// - width: explicit width or auto
 /// - measure-numbers: "system", "every", "none"
 /// - measures-per-line: if set, force this many measures per system line
+/// - output: "svg" (default) embeds each system as an SVG image; "native" places
+///   its lines, shapes and glyphs as Typst content (glyphs need the music font
+///   on the font path)
 #let score(
   staves: (),
   lyrics: (),
@@ -214,6 +288,7 @@
   measure-numbers: "system",
   relative-octave: false,
   measures-per-line: none,
+  output: "svg",
 ) = {
   if staves.len() == 0 { return }
 
@@ -269,13 +344,18 @@
       color: normalize-color(color),
       note_colors: normalize-note-colors(note-colors),
       tuplet_style: tuplet-style,
+      output: output,
     )
 
     let result-bytes = scorify-wasm.render_score(bytes(json.encode(input)))
     let result = json(result-bytes)
 
     for system in result.systems {
-      block(image(bytes(system.svg), format: "svg"))
+      if output == "native" {
+        block(render-native-system(system, music-font, avail-width-mm))
+      } else {
+        block(image(bytes(system.svg), format: "svg"))
+      }
       v(system-spacing)
     }
   }
@@ -309,6 +389,7 @@
   tuplet-style: "bracket",
   width: auto,
   measures-per-line: none,
+  output: "svg",
   instrument-name: none,
   instrument-name-cont: none,
 ) = {
@@ -328,6 +409,7 @@
     tuplet-style: tuplet-style,
     width: width,
     measures-per-line: measures-per-line,
+    output: output,
   )
 }
 

@@ -836,6 +836,21 @@ pub struct ScoreInput {
     pub note_colors: Option<BTreeMap<String, String>>,
     #[serde(default = "default_tuplet_style")]
     pub tuplet_style: String,
+    /// What each system carries back: an SVG image (the default) or the
+    /// resolved draw items a Typst frontend places as native content.
+    #[serde(default)]
+    pub output: OutputMode,
+}
+
+/// The form a system's drawing is returned in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputMode {
+    /// One SVG document per system, glyphs as outline paths.
+    #[default]
+    Svg,
+    /// [`NativeCmd`]s in the system's own frame, glyphs as music-font text.
+    Native,
 }
 
 fn default_tuplet_style() -> String {
@@ -895,6 +910,82 @@ pub struct SystemOutput {
     pub svg: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cmds: Vec<DrawCmd>,
+    /// The system drawn as native items, filled under [`OutputMode::Native`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<NativeCmd>,
+    /// The box `items` are placed in (mm), the size the SVG form would take.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_height: Option<f64>,
+}
+
+/// A draw item resolved for a frontend that places content itself.
+///
+/// Coordinates are in mm in the system's own box: origin top-left, x right,
+/// y DOWN, the same frame and size the SVG output uses (`width` by `height`).
+/// Origin moves are already applied and glyph anchors already resolved, so a
+/// frontend needs no font metrics: it places each item at its point.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "t")]
+pub enum NativeCmd {
+    /// Line from (x1,y1) to (x2,y2), stroke width w, butt caps.
+    #[serde(rename = "L")]
+    Line {
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        w: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// Music-font text v, its baseline origin at (x,y), font size s (mm).
+    #[serde(rename = "G")]
+    Glyphs {
+        x: f64,
+        y: f64,
+        v: String,
+        s: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// Text v at (x,y) aligned by anchor a, size s (pt), weight w, italic i.
+    #[serde(rename = "T")]
+    Text {
+        x: f64,
+        y: f64,
+        v: String,
+        s: f64,
+        w: Cow<'static, str>,
+        i: bool,
+        a: Cow<'static, str>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// Filled polygon, flat x,y pairs.
+    #[serde(rename = "P")]
+    Polygon {
+        pts: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// Filled closed region of two cubic beziers, laid out as in [`DrawCmd::BezierFill`].
+    #[serde(rename = "B")]
+    BezierFill {
+        pts: Vec<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// Filled circle, centre (x,y), radius r.
+    #[serde(rename = "C")]
+    Circle {
+        x: f64,
+        y: f64,
+        r: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
 }
 
 /// Internal drawing commands converted to SVG before returning to Typst.

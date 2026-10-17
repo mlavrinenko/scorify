@@ -16,7 +16,7 @@ const CLEF_PADDING: f64 = 0.5;
 const GRACE_NOTE_SCALE: f64 = 0.68;
 const GRACE_STEM_MIN_LENGTH: f64 = 3.0;
 const MUSIC_START_PADDING: f64 = 1.55;
-const LELAND_FONT: &[u8] = include_bytes!("../../fonts/Leland.otf");
+pub(crate) const LELAND_FONT: &[u8] = include_bytes!("../../fonts/Leland.otf");
 
 // ─── SMuFL codepoint helpers ───────────────────────────────────────────
 
@@ -480,7 +480,7 @@ impl OutlineBuilder for SvgPathBuilder<'_> {
     }
 }
 
-fn anchor_sw(x: f64, y: f64, width: f64, height: f64, anchor: &str) -> (f64, f64) {
+pub(crate) fn anchor_sw(x: f64, y: f64, width: f64, height: f64, anchor: &str) -> (f64, f64) {
     let sw_x = if anchor.contains("east") {
         x - width
     } else if anchor.contains("west") {
@@ -500,7 +500,7 @@ fn anchor_sw(x: f64, y: f64, width: f64, height: f64, anchor: &str) -> (f64, f64
     (sw_x, sw_y)
 }
 
-fn glyph_id(face: &Face<'_>, ch: char) -> Option<GlyphId> {
+pub(crate) fn glyph_id(face: &Face<'_>, ch: char) -> Option<GlyphId> {
     face.glyph_index(ch)
 }
 
@@ -810,7 +810,7 @@ fn smufl_name_for_codepoint(codepoint: u32) -> Option<&'static str> {
     }
 }
 
-fn smufl_bbox_for_codepoint(codepoint: u32, font: glyph::FontId) -> Option<glyph::BBox> {
+pub(crate) fn smufl_bbox_for_codepoint(codepoint: u32, font: glyph::FontId) -> Option<glyph::BBox> {
     if let Some(name) = smufl_name_for_codepoint(codepoint) {
         if let Some(bbox) = glyph::bbox_for(font, name) {
             return Some(bbox);
@@ -862,7 +862,7 @@ fn smufl_advance_for_codepoint(codepoint: u32, font: glyph::FontId) -> Option<f6
     }
 }
 
-fn music_text_bbox(value: &str, font: glyph::FontId) -> Option<glyph::BBox> {
+pub(crate) fn music_text_bbox(value: &str, font: glyph::FontId) -> Option<glyph::BBox> {
     let mut pen = 0.0;
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
@@ -886,7 +886,7 @@ fn music_text_bbox(value: &str, font: glyph::FontId) -> Option<glyph::BBox> {
     }
 }
 
-fn anchored_text_origin(
+pub(crate) fn anchored_text_origin(
     x: f64,
     y: f64,
     bbox: glyph::BBox,
@@ -912,12 +912,34 @@ fn anchored_text_origin(
     (x - anchor_x * scale, y - anchor_y * scale)
 }
 
-fn svg_from_cmds(
+/// The box a system draws into, in the renderer's y-up mm: its left edge
+/// `min_x`, its top edge `max_y`, and its size. Every output form shares it, so
+/// a system takes the same room drawn as SVG or as native items.
+pub(crate) struct Viewport {
+    pub min_x: f64,
+    pub max_y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Viewport {
+    /// A renderer x as an offset from the box's left edge.
+    pub fn x(&self, x: f64) -> f64 {
+        x - self.min_x
+    }
+
+    /// A renderer (y-up) y as a downward offset from the box's top edge.
+    pub fn y(&self, y: f64) -> f64 {
+        self.max_y - y
+    }
+}
+
+pub(crate) fn system_viewport(
     cmds: &[DrawCmd],
     width_mm: f64,
     fallback_height_mm: f64,
     music_font: &str,
-) -> String {
+) -> Viewport {
     let mut bounds = (0.0, -fallback_height_mm, width_mm, 0.0);
     let mut ox = 0.0;
     let mut oy = 0.0;
@@ -1016,11 +1038,33 @@ fn svg_from_cmds(
     let max_x = width_mm + margin;
     let min_y = bounds.1 - margin;
     let max_y = bounds.3 + margin;
-    let vb_w = (max_x - min_x).max(1.0);
-    let vb_h = (max_y - min_y).max(1.0);
+    Viewport {
+        min_x,
+        max_y,
+        width: (max_x - min_x).max(1.0),
+        height: (max_y - min_y).max(1.0),
+    }
+}
 
-    let tx = |x: f64| x - min_x;
-    let ty = |y: f64| max_y - y;
+fn svg_from_cmds(
+    cmds: &[DrawCmd],
+    width_mm: f64,
+    fallback_height_mm: f64,
+    music_font: &str,
+) -> String {
+    let view = system_viewport(cmds, width_mm, fallback_height_mm, music_font);
+    let (vb_w, vb_h) = (view.width, view.height);
+    let mut ox = 0.0;
+    let mut oy = 0.0;
+    let font_id = glyph::FontId::from_name(music_font);
+    let music_face = if music_font == "Leland" {
+        Face::parse(LELAND_FONT, 0).ok()
+    } else {
+        None
+    };
+
+    let tx = |x: f64| view.x(x);
+    let ty = |y: f64| view.y(y);
 
     let escaped_music_font = xml_escape(music_font);
     let mut svg = String::with_capacity(cmds.len() * 96 + 256);
@@ -1041,8 +1085,6 @@ fn svg_from_cmds(
         svg.push_str("</defs>");
     }
 
-    ox = 0.0;
-    oy = 0.0;
     for cmd in cmds {
         match cmd {
             DrawCmd::Line {
@@ -2104,6 +2146,7 @@ pub fn render_system_group(
     staff_colors: &[Option<&str>],
     music_font: &str,
     tuplet_style: &str,
+    output: OutputMode,
 ) -> SystemOutput {
     let font = glyph::FontId::from_name(music_font);
     let ed = glyph::engraving_defaults(font);
@@ -2483,13 +2526,27 @@ pub fn render_system_group(
     // Add below-staff content depth
     total_height += 1.75 * sp_unit; // baseline below depth
 
-    let svg = svg_from_cmds(&cmds, width_mm, total_height, music_font);
+    let (svg, items, frame) = match output {
+        OutputMode::Svg => (
+            svg_from_cmds(&cmds, width_mm, total_height, music_font),
+            Vec::new(),
+            None,
+        ),
+        OutputMode::Native => {
+            let view = system_viewport(&cmds, width_mm, total_height, music_font);
+            let items = crate::native::native_from_cmds(&cmds, &view, music_font);
+            (String::new(), items, Some((view.width, view.height)))
+        }
+    };
 
     SystemOutput {
         width: width_mm,
         height: total_height,
         svg,
         cmds: Vec::new(),
+        items,
+        box_width: frame.map(|f| f.0),
+        box_height: frame.map(|f| f.1),
     }
 }
 
