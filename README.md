@@ -100,3 +100,5 @@ Use `music-font-metadata` when you want to provide external SMuFL metadata expli
 ## License
 
 MIT - see [LICENSE](LICENSE).
+
+The bundled music fonts keep their own licenses. Leland (embedded in the WASM and shipped as `fonts/Leland.otf`) is SIL OFL 1.1, Copyright (c) 2025 MuseScore BVBA, Reserved Font Name "Leland" - see [fonts/LICENSE-Leland.txt](fonts/LICENSE-Leland.txt). Redistribute that file with any copy of the font. Bravura's license is [fonts/LICENSE.txt](fonts/LICENSE.txt).
